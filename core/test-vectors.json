@@ -1,0 +1,31 @@
+{
+  "description": "Test vectors for TOTP topic generation. All implementations must produce identical output.",
+  "algorithm": "HMAC-SHA256",
+  "topicLength": 32,
+  "vectors": [
+    {
+      "description": "Zero window index",
+      "secret": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "windowIndex": 0,
+      "expectedTopic": "acbc9dd34781c8264d36e5754f663a64"
+    },
+    {
+      "description": "Large window index",
+      "secret": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "windowIndex": 1000000,
+      "expectedTopic": "d298ee8d38cd98a093dbf71b8950d095"
+    },
+    {
+      "description": "All-F secret",
+      "secret": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "windowIndex": 12345,
+      "expectedTopic": "e3c1b82ce9caccc56cb932877b100cb9"
+    }
+  ],
+  "notes": [
+    "Secret is a 64-character hex string (256 bits)",
+    "Window index is encoded as big-endian 64-bit unsigned integer",
+    "Topic is first 32 characters of HMAC-SHA256 hex output",
+    "No prefix or suffix - pure hash output"
+  ]
+}
