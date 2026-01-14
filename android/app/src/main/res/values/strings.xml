@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Share to Inbox</string>
+    <string name="share_label">Share to Inbox</string>
+
+    <!-- Setup Screen -->
+    <string name="setup_title">Setup</string>
+    <string name="setup_scan_prompt">Scan the pairing QR code from your computer</string>
+    <string name="setup_success">Paired successfully!</string>
+    <string name="setup_error">Pairing failed. Please try again.</string>
+    <string name="setup_camera_permission">Camera permission is required to scan QR codes</string>
+
+    <!-- Main Screen -->
+    <string name="status_paired">Paired</string>
+    <string name="status_not_paired">Not Paired</string>
+    <string name="status_expired">Expired</string>
+    <string name="expires_label">Expires: %1$s</string>
+    <string name="days_remaining">%1$d days remaining</string>
+
+    <!-- Share Screen -->
+    <string name="sending">Sending...</string>
+    <string name="sent_success">Sent!</string>
+    <string name="sent_error">Failed to send</string>
+    <string name="not_paired_error">Not paired. Open the app to set up.</string>
+    <string name="expired_error">Pairing expired. Open the app to re-pair.</string>
+
+    <!-- Buttons -->
+    <string name="btn_scan_qr">Scan QR Code</string>
+    <string name="btn_retry">Retry</string>
+    <string name="btn_done">Done</string>
+</resources>
