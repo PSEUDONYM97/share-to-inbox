@@ -1,7 +1,7 @@
 ---
 description: "Check your phone inbox for shared content"
-allowed-tools: ["Read", "Bash", "Write"]
-argument-hint: "[clear|rotate|status] - optional action"
+allowed-tools: ["Read", "Bash"]
+argument-hint: "[status|rotate] - optional action"
 ---
 
 # Phone Inbox
@@ -13,18 +13,83 @@ $ARGUMENTS
 
 ## Instructions
 
-> **Phase 2 Implementation Required**
+### Step 1: Check for Subcommand
+
+If argument is "status" or "rotate", redirect to the appropriate command:
+- "status" → Run /inbox-status instructions
+- "rotate" → Run /inbox-setup with rotation mode
+
+If no argument or "check", continue to fetch messages.
+
+### Step 2: Read Config
+
+Read the inbox config:
+```bash
+cat "C:/Users/jwill/.share-to-inbox/config.json" 2>/dev/null
+```
+
+If config doesn't exist, tell the user:
+> No inbox configured. Run `/inbox setup` to pair your phone.
+
+### Step 3: Check Expiration
+
+Parse the config and check if expired:
+- If `expiresAtTimestamp < Date.now()`, tell user pairing is expired
+- Show how long ago it expired
+- Suggest running `/inbox setup` to re-pair
+
+### Step 4: Fetch Messages
+
+Run the fetch script:
+```bash
+cd "C:/Users/jwill/Projects/android/share-to-inbox" && node -e "
+import { readFile } from 'fs/promises';
+import { fetchInbox, formatInboxForDisplay } from './plugin/scripts/fetch-inbox.js';
+
+const config = JSON.parse(await readFile('C:/Users/jwill/.share-to-inbox/config.json', 'utf8'));
+const messages = await fetchInbox(config);
+const result = formatInboxForDisplay(messages);
+
+console.log(JSON.stringify(result, null, 2));
+"
+```
+
+### Step 5: Display Results
+
+**If no messages:**
+> **Inbox Empty**
 >
-> This command stub will be fully implemented in Phase 2.
-> It will:
-> 1. Read config from plugin directory
-> 2. Compute current + previous TOTP topics
-> 3. Fetch from ntfy.sh
-> 4. Display messages with timestamps
-> 5. Handle subcommands (status, rotate, etc.)
+> No messages in the last 24 hours.
+>
+> Share something from your phone and it will appear here!
 
-### Placeholder Response
+**If messages found:**
+> **Inbox** (X messages)
+>
+> ### [Timestamp 1]
+> [Message content]
+>
+> ---
+>
+> ### [Timestamp 2]
+> [Message content]
+>
+> ---
+>
+> Would you like me to:
+> - Summarize any of these?
+> - Take action on a link?
+> - Save something to a file?
 
-For now, respond with:
+### Step 6: Offer Actions
 
-"The /inbox command will be available after Phase 2 implementation. The foundation (TOTP algorithm, test vectors, architecture) is complete."
+After displaying messages, proactively offer to help:
+- If a message contains a URL, offer to fetch/summarize it
+- If a message is long text, offer to summarize
+- If a message looks like notes, offer to format/organize
+
+### Status Information
+
+At the end, optionally show:
+> *Pairing expires: [DATE] ([X] days remaining)*
+> *Current topic window expires: [TIME]*
