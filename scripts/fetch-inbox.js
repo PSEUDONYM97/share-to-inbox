@@ -10,7 +10,7 @@
  * - Image decoding to temp files
  */
 
-import { getRetrievalTopics, getWindowExpiry } from '../../core/totp.js';
+import { getRetrievalTopics, getWindowExpiry } from './totp.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -274,11 +274,10 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
       } else if (msg.type === 'url') {
         console.log(`   ${msg.content}`);
       } else {
-        // Truncate long text for display
-        const preview = msg.content.length > 200
-          ? msg.content.substring(0, 200) + '...'
-          : msg.content;
-        console.log(`   ${preview}`);
+        // Show full text - Claude can handle it
+        // Indent continuation lines for readability
+        const indented = msg.content.split('\n').join('\n   ');
+        console.log(`   ${indented}`);
       }
       console.log('');
     }

@@ -10,13 +10,19 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.shareinbox.network.InboxSender
 import com.shareinbox.storage.SecureStorage
 import com.shareinbox.ui.theme.ShareToInboxTheme
@@ -29,6 +35,10 @@ import java.io.ByteArrayOutputStream
  * This activity appears in the Android share menu.
  * It's designed to be fast and minimal - share, send, dismiss.
  *
+ * Multi-channel support:
+ * - 1 channel: sends immediately (no UI)
+ * - 2+ channels: shows quick picker
+ *
  * SECURITY:
  * - No logging of content
  * - Topic computed and immediately discarded (key evaporation)
@@ -40,20 +50,12 @@ class ShareReceiverActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val storage = SecureStorage(this)
+        val channels = storage.getChannels()
 
         // Check pairing status
-        when (val status = storage.getStatusInfo()) {
-            is SecureStorage.PairingStatus.NotPaired -> {
-                showError(R.string.not_paired_error)
-                return
-            }
-            is SecureStorage.PairingStatus.Expired -> {
-                showError(R.string.expired_error)
-                return
-            }
-            is SecureStorage.PairingStatus.Paired -> {
-                // Continue with sharing
-            }
+        if (channels.isEmpty()) {
+            showError(R.string.not_paired_error)
+            return
         }
 
         // Extract shared content
@@ -63,21 +65,34 @@ class ShareReceiverActivity : ComponentActivity() {
             return
         }
 
-        // Show sending UI and perform send
+        // Show UI based on channel count
         setContent {
             ShareToInboxTheme {
-                SendingScreen(
-                    content = content,
-                    storage = storage,
-                    onComplete = { success ->
-                        if (success) {
-                            Toast.makeText(this, R.string.sent_success, Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(this, R.string.sent_error, Toast.LENGTH_SHORT).show()
+                if (channels.size == 1) {
+                    // Single channel - send immediately
+                    SendingScreen(
+                        content = content,
+                        channel = channels.first(),
+                        onComplete = { success ->
+                            showResult(success)
+                            finish()
                         }
-                        finish()
-                    }
-                )
+                    )
+                } else {
+                    // Multiple channels - show picker
+                    ChannelPickerScreen(
+                        channels = channels,
+                        content = content,
+                        onChannelSelected = { channel ->
+                            // Switch to sending screen
+                        },
+                        onCancel = { finish() },
+                        onComplete = { success ->
+                            showResult(success)
+                            finish()
+                        }
+                    )
+                }
             }
         }
     }
@@ -90,7 +105,6 @@ class ShareReceiverActivity : ComponentActivity() {
                         intent.getStringExtra(Intent.EXTRA_TEXT)
                     }
                     intent.type?.startsWith("image/") == true -> {
-                        // Read image, compress, and base64 encode
                         val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
                         uri?.let { encodeImage(it) }
                     }
@@ -103,12 +117,9 @@ class ShareReceiverActivity : ComponentActivity() {
 
     /**
      * Read image from URI, resize if needed, and base64 encode
-     *
-     * ntfy.sh has limits, so we compress to stay under ~400KB
      */
     private fun encodeImage(uri: Uri): String? {
         return try {
-            // Read image bytes
             val inputStream = contentResolver.openInputStream(uri) ?: return null
             val originalBitmap = BitmapFactory.decodeStream(inputStream)
             inputStream.close()
@@ -146,40 +157,150 @@ class ShareReceiverActivity : ComponentActivity() {
         Toast.makeText(this, messageRes, Toast.LENGTH_LONG).show()
         finish()
     }
+
+    private fun showResult(success: Boolean) {
+        val messageRes = if (success) R.string.sent_success else R.string.sent_error
+        Toast.makeText(this, messageRes, Toast.LENGTH_SHORT).show()
+    }
+}
+
+@Composable
+private fun ChannelPickerScreen(
+    channels: List<SecureStorage.Channel>,
+    content: String,
+    onChannelSelected: (SecureStorage.Channel) -> Unit,
+    onCancel: () -> Unit,
+    onComplete: (Boolean) -> Unit
+) {
+    var selectedChannel by remember { mutableStateOf<SecureStorage.Channel?>(null) }
+    var isSending by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // If a channel is selected, send to it
+    LaunchedEffect(selectedChannel) {
+        selectedChannel?.let { channel ->
+            isSending = true
+            scope.launch {
+                val result = InboxSender.send(
+                    content = content,
+                    secret = channel.secret,
+                    server = channel.server,
+                    windowSeconds = channel.windowSeconds
+                )
+                onComplete(result is InboxSender.SendResult.Success)
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.7f))
+            .clickable { onCancel() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .padding(32.dp)
+                .clickable { /* prevent click-through */ },
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (isSending) {
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Sending to ${selectedChannel?.name}...")
+                } else {
+                    Text(
+                        "Send to",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 300.dp)
+                    ) {
+                        items(channels) { channel ->
+                            ChannelItem(
+                                channel = channel,
+                                onClick = { selectedChannel = channel }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TextButton(onClick = onCancel) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChannelItem(
+    channel: SecureStorage.Channel,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    channel.name,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp
+                )
+                Text(
+                    "${channel.getDaysRemaining()} days left",
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                )
+            }
+        }
+    }
 }
 
 @Composable
 private fun SendingScreen(
     content: String,
-    storage: SecureStorage,
+    channel: SecureStorage.Channel,
     onComplete: (Boolean) -> Unit
 ) {
     var isSending by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
-    // Trigger send on composition
     LaunchedEffect(Unit) {
         scope.launch {
-            val secret = storage.getSecret()
-            if (secret == null) {
-                onComplete(false)
-                return@launch
-            }
-
             val result = InboxSender.send(
                 content = content,
-                secret = secret,
-                server = storage.getServer(),
-                windowSeconds = storage.getWindowSeconds()
+                secret = channel.secret,
+                server = channel.server,
+                windowSeconds = channel.windowSeconds
             )
-
-            // Secret variable goes out of scope - evaporated
             isSending = false
             onComplete(result is InboxSender.SendResult.Success)
         }
     }
 
-    // Minimal UI - just a loading indicator
     Box(
         modifier = Modifier
             .fillMaxSize()

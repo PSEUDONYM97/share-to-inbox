@@ -101,31 +101,44 @@ export function maskSecret(secret) {
 
 // CLI interface
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('generate-secret.js')) {
-  const days = parseInt(process.argv[2]) || 90;
+  import('fs').then(fs => {
+    import('os').then(os => {
+      import('path').then(path => {
+        const days = parseInt(process.argv[2]) || 90;
 
-  console.log(`Generating ${days}-day secret...\n`);
+        console.log(`Generating ${days}-day secret...\n`);
 
-  try {
-    const secretData = generateSecret(days);
-    const config = createConfig(secretData);
-    const qrPayload = createQrPayload(secretData);
+        try {
+          const secretData = generateSecret(days);
+          const config = createConfig(secretData);
+          const qrPayload = createQrPayload(secretData);
 
-    console.log('Config (for local storage):');
-    console.log(JSON.stringify(config, null, 2));
-    console.log('');
+          // Save config to disk
+          const configDir = path.join(os.homedir(), '.share-to-inbox');
+          const configPath = path.join(configDir, 'config.json');
 
-    console.log('QR Payload (for phone):');
-    console.log(JSON.stringify(qrPayload));
-    console.log('');
+          if (!fs.existsSync(configDir)) {
+            fs.mkdirSync(configDir, { recursive: true });
+          }
+          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
-    console.log('Summary:');
-    console.log('  Secret:    ', maskSecret(secretData.secret));
-    console.log('  Expires:   ', new Date(secretData.expiresAt).toLocaleDateString());
-    console.log('  Days:      ', days);
-    console.log('  Window:    ', secretData.windowSeconds / 3600, 'hours');
-    console.log('  Server:    ', secretData.server);
-  } catch (err) {
-    console.error('ERROR:', err.message);
-    process.exit(1);
-  }
+          console.log('Config saved to:', configPath);
+          console.log('');
+
+          console.log('Summary:');
+          console.log('  Secret:    ', maskSecret(secretData.secret));
+          console.log('  Expires:   ', new Date(secretData.expiresAt).toLocaleDateString());
+          console.log('  Days:      ', days);
+          console.log('  Window:    ', secretData.windowSeconds / 3600, 'hours');
+          console.log('  Server:    ', secretData.server);
+          console.log('');
+          console.log('Run: node plugin/scripts/generate-qr.js --pairing');
+          console.log('to display the pairing QR code.');
+        } catch (err) {
+          console.error('ERROR:', err.message);
+          process.exit(1);
+        }
+      });
+    });
+  });
 }

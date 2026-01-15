@@ -14,6 +14,8 @@ import java.util.concurrent.TimeUnit
  *
  * KEY EVAPORATION: The topic is computed, used, and immediately discarded.
  * No topic history is stored.
+ *
+ * NOTE: ntfy.sh automatically converts messages >4KB to attachments
  */
 object InboxSender {
 
@@ -45,7 +47,7 @@ object InboxSender {
             // Build URL
             val url = "$server/$topic"
 
-            // Create request
+            // Create request - ntfy.sh auto-converts large messages to attachments
             val request = Request.Builder()
                 .url(url)
                 .post(content.toRequestBody("text/plain".toMediaType()))

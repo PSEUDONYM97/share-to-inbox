@@ -102,7 +102,7 @@ Usually clock drift. We check current + previous window to handle minor drift (u
 
 ## Scripts
 
-Located in `plugin/scripts/`:
+Located in `scripts/`:
 
 - `hardware-id.js` - Cross-platform hardware fingerprinting
 - `generate-secret.js` - Hardware-bound secret generation

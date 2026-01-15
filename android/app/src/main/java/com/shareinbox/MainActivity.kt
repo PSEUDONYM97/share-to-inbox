@@ -4,11 +4,20 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -19,36 +28,26 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 /**
- * Main activity showing pairing status
+ * Main activity showing channel list and management
  *
- * - If not paired: Shows setup prompt
- * - If paired: Shows status and expiration
- * - If expired: Shows re-pair prompt
+ * Multi-channel support:
+ * - Shows list of all paired channels
+ * - Long-press to rename or delete
+ * - Add button to pair new devices
  */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        setContent {
-            ShareToInboxTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    MainScreen(
-                        onSetupClick = {
-                            startActivity(Intent(this, SetupActivity::class.java))
-                        }
-                    )
-                }
-            }
-        }
+        refreshContent()
     }
 
     override fun onResume() {
         super.onResume()
-        // Refresh UI when returning from setup
+        refreshContent()
+    }
+
+    private fun refreshContent() {
         setContent {
             ShareToInboxTheme {
                 Surface(
@@ -56,7 +55,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     MainScreen(
-                        onSetupClick = {
+                        onAddChannel = {
                             startActivity(Intent(this, SetupActivity::class.java))
                         }
                     )
@@ -66,26 +65,34 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MainScreen(onSetupClick: () -> Unit) {
+private fun MainScreen(onAddChannel: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val storage = remember { SecureStorage(context) }
-    val status = remember { storage.getStatusInfo() }
+    var channels by remember { mutableStateOf(storage.getChannels()) }
+
+    // Dialog states
+    var channelToRename by remember { mutableStateOf<SecureStorage.Channel?>(null) }
+    var channelToDelete by remember { mutableStateOf<SecureStorage.Channel?>(null) }
+    var newName by remember { mutableStateOf("") }
+
+    // Refresh channels when needed
+    fun refresh() {
+        channels = storage.getChannels()
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .padding(24.dp)
     ) {
+        // Header
         Text(
             text = "Share to Inbox",
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold
         )
-
-        Spacer(modifier = Modifier.height(8.dp))
 
         Text(
             text = "Secure sharing to your AI",
@@ -93,24 +100,217 @@ private fun MainScreen(onSetupClick: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        when (status) {
-            is SecureStorage.PairingStatus.NotPaired -> {
-                NotPairedContent(onSetupClick)
+        if (channels.isEmpty()) {
+            // No channels - show setup prompt
+            NoChannelsContent(onAddChannel)
+        } else {
+            // Channel list header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Channels",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                FilledTonalButton(
+                    onClick = onAddChannel,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add")
+                }
             }
-            is SecureStorage.PairingStatus.Expired -> {
-                ExpiredContent(onSetupClick)
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Channel list
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(channels, key = { it.name }) { channel ->
+                    ChannelCard(
+                        channel = channel,
+                        onRename = {
+                            channelToRename = channel
+                            newName = channel.name
+                        },
+                        onDelete = { channelToDelete = channel }
+                    )
+                }
             }
-            is SecureStorage.PairingStatus.Paired -> {
-                PairedContent(status, onSetupClick)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // How to use
+            HowToUseCard()
+        }
+    }
+
+    // Rename dialog
+    if (channelToRename != null) {
+        AlertDialog(
+            onDismissRequest = { channelToRename = null },
+            title = { Text("Rename Channel") },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Channel name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newName.isNotBlank() && newName != channelToRename?.name) {
+                            storage.renameChannel(channelToRename!!.name, newName.trim())
+                            refresh()
+                        }
+                        channelToRename = null
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { channelToRename = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Delete confirmation dialog
+    if (channelToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { channelToDelete = null },
+            title = { Text("Delete Channel?") },
+            text = {
+                Text("This will remove \"${channelToDelete?.name}\" and you'll need to re-pair to use it again.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        storage.removeChannel(channelToDelete!!.name)
+                        refresh()
+                        channelToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { channelToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ChannelCard(
+    channel: SecureStorage.Channel,
+    onRename: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()) }
+    val expiryDate = remember(channel.expiresAt) { Date(channel.expiresAt) }
+    var showMenu by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = { /* no-op */ },
+                onLongClick = { showMenu = true }
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = channel.name,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${channel.getDaysRemaining()} days left • Expires ${dateFormat.format(expiryDate)}",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                )
+            }
+
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        onClick = {
+                            showMenu = false
+                            onRename()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Edit, contentDescription = null)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        onClick = {
+                            showMenu = false
+                            onDelete()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun NotPairedContent(onSetupClick: () -> Unit) {
+private fun NoChannelsContent(onAddChannel: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -118,11 +318,13 @@ private fun NotPairedContent(onSetupClick: () -> Unit) {
         )
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Not Paired",
+                text = "No Channels",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold
             )
@@ -130,7 +332,7 @@ private fun NotPairedContent(onSetupClick: () -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Scan the QR code from your computer to start sharing.",
+                text = "Scan a QR code from your computer to start sharing.",
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -138,114 +340,23 @@ private fun NotPairedContent(onSetupClick: () -> Unit) {
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
-                onClick = onSetupClick,
+                onClick = onAddChannel,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Scan QR Code")
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Add Channel")
             }
-        }
-    }
-}
-
-@Composable
-private fun ExpiredContent(onSetupClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "Pairing Expired",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "Your pairing has expired. Scan a new QR code from your computer to re-pair.",
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = onSetupClick,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Scan QR Code")
-            }
-        }
-    }
-}
-
-@Composable
-private fun PairedContent(
-    status: SecureStorage.PairingStatus.Paired,
-    onSetupClick: () -> Unit
-) {
-    val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()) }
-    val expiryDate = remember { Date(status.expiresAt * 1000) }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "Paired",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "Expires: ${dateFormat.format(expiryDate)}",
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-
-            Text(
-                text = "${status.daysRemaining} days remaining",
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "Share anything using the Android share menu and it will appear in your AI inbox.",
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-            )
         }
     }
 
     Spacer(modifier = Modifier.height(24.dp))
 
-    // Re-pair option
-    OutlinedButton(
-        onClick = onSetupClick,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text("Re-pair with New QR")
-    }
+    HowToUseCard()
+}
 
-    Spacer(modifier = Modifier.height(48.dp))
-
-    // How to use section
+@Composable
+private fun HowToUseCard() {
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -257,10 +368,10 @@ private fun PairedContent(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Text("1. Select any text, link, or content")
-            Text("2. Tap Share")
-            Text("3. Select \"Share to Inbox\"")
-            Text("4. Ask your AI \"check my inbox\"")
+            Text("1. Select any text, link, or image", fontSize = 14.sp)
+            Text("2. Tap Share", fontSize = 14.sp)
+            Text("3. Select \"Share to Inbox\"", fontSize = 14.sp)
+            Text("4. Ask your AI \"check my inbox\"", fontSize = 14.sp)
         }
     }
 }

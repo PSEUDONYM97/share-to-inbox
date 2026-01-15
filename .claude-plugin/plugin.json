@@ -1,0 +1,10 @@
+{
+  "name": "share-to-inbox",
+  "description": "Share content from Android to your AI inbox. Zero-knowledge, ephemeral, privacy-first.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Jared Williams"
+  },
+  "repository": "https://github.com/PSEUDONYM97/share-to-inbox",
+  "license": "MIT"
+}
