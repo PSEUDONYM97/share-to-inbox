@@ -2,112 +2,171 @@
 /**
  * Fetch messages from ntfy.sh inbox
  *
- * Retrieves messages from the current and previous time windows
- * to handle clock skew gracefully.
+ * Handles:
+ * - Plain text messages
+ * - URLs
+ * - Images (base64 encoded, stored as attachments)
+ * - Automatic attachment downloading
+ * - Image decoding to temp files
  */
 
-import { getCurrentTopic, getRetrievalTopics, getWindowExpiry } from '../../core/totp.js';
+import { getRetrievalTopics, getWindowExpiry } from '../../core/totp.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 /**
- * Fetch messages for a single topic
- *
- * @param {string} server - ntfy server URL
- * @param {string} topic - Topic to fetch
- * @param {string} since - Time filter (e.g., "24h", "12h")
- * @returns {Promise<Array>} Messages
+ * Fetch a single ntfy.sh topic
  */
 async function fetchTopic(server, topic, since = '24h') {
   const url = `${server}/${topic}/json?poll=1&since=${since}`;
 
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-
+    const response = await fetch(url);
     if (!response.ok) {
-      if (response.status === 404) {
-        return []; // No messages
-      }
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (response.status === 404) return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const text = await response.text();
     if (!text.trim()) return [];
 
-    // Each line is a separate JSON object
-    const messages = text.trim().split('\n')
+    return text.trim().split('\n')
       .map(line => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
+        try { return JSON.parse(line); }
+        catch { return null; }
       })
       .filter(msg => msg && msg.event === 'message');
-
-    return messages;
   } catch (err) {
-    // Network errors, etc.
     console.error(`Error fetching ${topic}:`, err.message);
     return [];
   }
 }
 
 /**
- * Fetch messages from inbox using TOTP topics
- *
- * Fetches from both current and previous window to handle clock skew.
- *
- * @param {object} config - Inbox configuration
- * @returns {Promise<Array>} Deduplicated messages sorted by time
+ * Download attachment content from ntfy.sh
+ */
+async function downloadAttachment(attachmentUrl) {
+  try {
+    const response = await fetch(attachmentUrl);
+    if (!response.ok) return null;
+    return await response.text();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decode base64 image and save to temp file
+ * Returns the file path or null on failure
+ */
+function decodeAndSaveImage(content, messageId) {
+  const match = content.match(/^\[IMAGE:data:image\/(\w+);base64,(.+)\]$/);
+  if (!match) return null;
+
+  const format = match[1]; // jpeg, png, etc.
+  const base64Data = match[2];
+
+  try {
+    const buffer = Buffer.from(base64Data, 'base64');
+    const tempDir = path.join(os.tmpdir(), 'share-to-inbox');
+
+    // Create temp dir if needed
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    const filePath = path.join(tempDir, `image-${messageId}.${format}`);
+    fs.writeFileSync(filePath, buffer);
+    return filePath;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Determine message type from content
+ */
+function classifyContent(content) {
+  if (content.startsWith('[IMAGE:data:image/')) {
+    return 'image';
+  }
+  if (/^https?:\/\/\S+$/.test(content.trim())) {
+    return 'url';
+  }
+  return 'text';
+}
+
+/**
+ * Process a raw ntfy message into structured format
+ */
+async function processMessage(msg) {
+  let content = msg.message;
+  let type = 'text';
+  let filePath = null;
+
+  // If there's an attachment, download it first
+  if (msg.attachment && msg.attachment.url) {
+    const attachmentContent = await downloadAttachment(msg.attachment.url);
+    if (attachmentContent) {
+      content = attachmentContent;
+    }
+  }
+
+  // Classify the content
+  type = classifyContent(content);
+
+  // Handle images specially
+  if (type === 'image') {
+    filePath = decodeAndSaveImage(content, msg.id);
+    if (filePath) {
+      content = `Image saved to: ${filePath}`;
+    } else {
+      content = '[Image decode failed]';
+    }
+  }
+
+  return {
+    id: msg.id,
+    time: new Date(msg.time * 1000),
+    timestamp: msg.time,
+    type,
+    content,
+    filePath,
+    hasAttachment: !!msg.attachment
+  };
+}
+
+/**
+ * Fetch and process all inbox messages
  */
 export async function fetchInbox(config) {
   const { secret, server, windowSeconds } = config;
-
-  // Get topics for current and previous windows
   const topics = getRetrievalTopics(secret, windowSeconds);
 
-  // Fetch from both topics in parallel
-  const results = await Promise.all(
-    topics.map(topic => fetchTopic(server, topic, '24h'))
-  );
+  // Fetch from both current and previous window topics
+  const rawMessages = [];
+  for (const topic of topics) {
+    const messages = await fetchTopic(server, topic, '24h');
+    rawMessages.push(...messages);
+  }
 
-  // Flatten and deduplicate by message ID
+  // Process all messages (download attachments, decode images)
+  const processed = await Promise.all(rawMessages.map(processMessage));
+
+  // Deduplicate by ID and sort newest first
   const seen = new Set();
-  const messages = results.flat()
+  return processed
     .filter(msg => {
       if (seen.has(msg.id)) return false;
       seen.add(msg.id);
       return true;
     })
-    .sort((a, b) => b.time - a.time); // Newest first
-
-  return messages;
+    .sort((a, b) => b.timestamp - a.timestamp);
 }
 
 /**
- * Format a message for display
- */
-export function formatMessage(msg) {
-  const time = new Date(msg.time * 1000);
-  const timeStr = time.toLocaleString();
-
-  return {
-    id: msg.id,
-    time: timeStr,
-    timestamp: msg.time,
-    content: msg.message,
-    title: msg.title || null,
-    tags: msg.tags || [],
-    priority: msg.priority || 3
-  };
-}
-
-/**
- * Format all messages for AI-friendly output
+ * Format messages for display
  */
 export function formatInboxForDisplay(messages) {
   if (messages.length === 0) {
@@ -118,12 +177,30 @@ export function formatInboxForDisplay(messages) {
     };
   }
 
-  const formatted = messages.map(formatMessage);
+  const byType = {
+    text: messages.filter(m => m.type === 'text'),
+    url: messages.filter(m => m.type === 'url'),
+    image: messages.filter(m => m.type === 'image')
+  };
+
+  const summary = [
+    `${messages.length} message${messages.length === 1 ? '' : 's'} in inbox`,
+    byType.text.length > 0 ? `${byType.text.length} text` : null,
+    byType.url.length > 0 ? `${byType.url.length} URL${byType.url.length > 1 ? 's' : ''}` : null,
+    byType.image.length > 0 ? `${byType.image.length} image${byType.image.length > 1 ? 's' : ''}` : null
+  ].filter(Boolean).join(' | ');
 
   return {
     count: messages.length,
-    summary: `${messages.length} message${messages.length === 1 ? '' : 's'} in inbox.`,
-    messages: formatted
+    summary,
+    byType,
+    messages: messages.map(m => ({
+      id: m.id,
+      time: m.time.toLocaleString(),
+      type: m.type,
+      content: m.content,
+      filePath: m.filePath
+    }))
   };
 }
 
@@ -132,7 +209,7 @@ export function formatInboxForDisplay(messages) {
  */
 export function getInboxStatus(config) {
   const windowExpiry = getWindowExpiry(config.windowSeconds);
-  const expiresAt = new Date(config.expiresAt);
+  const expiresAt = new Date(config.expiresAt || config.expiresAtTimestamp);
   const now = new Date();
 
   const msUntilExpiry = expiresAt.getTime() - now.getTime();
@@ -149,52 +226,61 @@ export function getInboxStatus(config) {
   };
 }
 
-// CLI interface
+// ============================================================
+// CLI Interface
+// ============================================================
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('fetch-inbox.js')) {
-  import('fs').then(fs => {
-    import('os').then(os => {
-      import('path').then(async path => {
-        // Load config from file
-        const configPath = path.join(os.homedir(), '.share-to-inbox', 'config.json');
-        let config;
+  (async () => {
+    // Load config
+    const configPath = path.join(os.homedir(), '.share-to-inbox', 'config.json');
+    let config;
 
-        try {
-          config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        } catch (e) {
-          console.error('No config found at', configPath);
-          console.error('Run generate-secret.js first to set up pairing.');
-          process.exit(1);
-        }
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    } catch (e) {
+      console.error('ERROR: No config found at', configPath);
+      console.error('Run /inbox-setup first to pair with your phone.');
+      process.exit(1);
+    }
 
-        console.log('Fetching inbox...\n');
-        console.log('Config:', {
-          secret: config.secret.substring(0, 8) + '...',
-          server: config.server,
-          windowSeconds: config.windowSeconds
-        });
-        console.log('');
+    // Show status
+    const status = getInboxStatus(config);
+    console.log('╔══════════════════════════════════════════════════════════╗');
+    console.log('║                    SHARE TO INBOX                        ║');
+    console.log('╚══════════════════════════════════════════════════════════╝');
+    console.log(`  Pairing expires: ${status.expiresAt} (${status.daysRemaining} days)`);
+    console.log(`  Topic window: ${status.windowHours}h (rotates at ${status.windowExpiry})`);
+    console.log('');
 
-        const topics = getRetrievalTopics(config.secret, config.windowSeconds);
-        console.log('Checking topics:');
-        console.log('  Current:  ', topics[0]);
-        console.log('  Previous: ', topics[1]);
-        console.log('');
+    // Fetch messages
+    console.log('Fetching messages...\n');
+    const messages = await fetchInbox(config);
+    const result = formatInboxForDisplay(messages);
 
-        try {
-          const messages = await fetchInbox(config);
-          const result = formatInboxForDisplay(messages);
-          console.log('Result:', result.summary);
-          if (result.messages.length > 0) {
-            console.log('\nMessages:');
-            for (const msg of result.messages) {
-              console.log(`\n[${msg.time}]`);
-              console.log(msg.content);
-            }
-          }
-        } catch (err) {
-          console.error('Error:', err.message);
-        }
-      });
-    });
-  });
+    console.log(`📬 ${result.summary}\n`);
+
+    if (messages.length === 0) {
+      console.log('  Share something from your phone to see it here.');
+      process.exit(0);
+    }
+
+    // Display messages grouped by type
+    for (const msg of result.messages) {
+      const icon = msg.type === 'image' ? '🖼️' : msg.type === 'url' ? '🔗' : '📝';
+      console.log(`${icon} [${msg.time}]`);
+
+      if (msg.type === 'image' && msg.filePath) {
+        console.log(`   ${msg.filePath}`);
+      } else if (msg.type === 'url') {
+        console.log(`   ${msg.content}`);
+      } else {
+        // Truncate long text for display
+        const preview = msg.content.length > 200
+          ? msg.content.substring(0, 200) + '...'
+          : msg.content;
+        console.log(`   ${preview}`);
+      }
+      console.log('');
+    }
+  })();
 }
