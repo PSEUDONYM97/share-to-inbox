@@ -51,7 +51,8 @@ class SecureStorage(context: Context) {
     fun isExpired(): Boolean {
         val expiresAt = prefs.getLong(KEY_EXPIRES_AT, 0)
         if (expiresAt == 0L) return true
-        return System.currentTimeMillis() >= expiresAt * 1000 // Convert seconds to ms
+        // expiresAt is stored in milliseconds
+        return System.currentTimeMillis() >= expiresAt
     }
 
     /**
@@ -95,10 +96,10 @@ class SecureStorage(context: Context) {
     fun getDaysRemaining(): Int {
         val expiresAt = getExpiresAt()
         if (expiresAt == 0L) return 0
-        val nowSeconds = System.currentTimeMillis() / 1000
-        val remaining = expiresAt - nowSeconds
-        if (remaining <= 0) return 0
-        return (remaining / 86400).toInt() + 1 // Round up
+        val nowMs = System.currentTimeMillis()
+        val remainingMs = expiresAt - nowMs
+        if (remainingMs <= 0) return 0
+        return (remainingMs / 86400000).toInt() + 1 // ms per day, round up
     }
 
     /**
@@ -120,7 +121,8 @@ class SecureStorage(context: Context) {
             if (secret.length != 64) {
                 return false // Invalid secret length
             }
-            if (expiresAt <= System.currentTimeMillis() / 1000) {
+            // expiresAt is in milliseconds
+            if (expiresAt <= System.currentTimeMillis()) {
                 return false // Already expired
             }
 

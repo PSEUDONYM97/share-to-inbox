@@ -16,29 +16,19 @@
  */
 export async function generateAsciiQr(data, options = {}) {
   try {
-    // Try qrcode-terminal first (commonly available)
-    const qrcodeTerminal = await import('qrcode-terminal').catch(() => null);
-    if (qrcodeTerminal) {
-      return new Promise((resolve) => {
-        let output = '';
-        qrcodeTerminal.generate(data, { small: options.small !== false }, (qr) => {
-          output = qr;
-          resolve(output);
-        });
-        // Fallback if callback doesn't fire
-        setTimeout(() => resolve(output || generateFallbackQr(data)), 1000);
-      });
-    }
-
-    // Try qrcode library (generates to string)
+    // Try qrcode library first (more reliable API)
     const qrcode = await import('qrcode').catch(() => null);
-    if (qrcode) {
+    if (qrcode && qrcode.toString) {
       return await qrcode.toString(data, { type: 'terminal', small: options.small !== false });
+    }
+    if (qrcode && qrcode.default && qrcode.default.toString) {
+      return await qrcode.default.toString(data, { type: 'terminal', small: options.small !== false });
     }
 
     // Fallback: just show the data
     return generateFallbackQr(data);
-  } catch {
+  } catch (e) {
+    console.error('QR generation error:', e.message);
     return generateFallbackQr(data);
   }
 }
@@ -112,10 +102,33 @@ export function getApkDownloadUrl(repoOwner = 'jaredwilliam', repoName = 'share-
 
 // CLI interface
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('generate-qr.js')) {
-  const data = process.argv[2] || 'https://example.com/test';
-  const title = process.argv[3] || 'QR Code';
-
-  displayQr(title, data).then(() => {
-    console.log('Data encoded:', data);
+  import('fs').then(async (fs) => {
+    import('os').then(async (os) => {
+      import('path').then(async (path) => {
+        // Check for --pairing flag to generate from config
+        if (process.argv.includes('--pairing')) {
+          const configPath = path.join(os.homedir(), '.share-to-inbox', 'config.json');
+          try {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            const pairingData = JSON.stringify({
+              s: config.secret,
+              e: config.expiresAtTimestamp,
+              w: config.windowSeconds,
+              u: config.server
+            });
+            await displayQr('PAIRING QR CODE - Scan with Share to Inbox app', pairingData);
+            console.log('Pairing expires:', new Date(config.expiresAtTimestamp).toLocaleDateString());
+          } catch (e) {
+            console.error('No config found. Run generate-secret.js first.');
+            process.exit(1);
+          }
+        } else {
+          const data = process.argv[2] || 'https://example.com/test';
+          const title = process.argv[3] || 'QR Code';
+          await displayQr(title, data);
+          console.log('Data encoded:', data);
+        }
+      });
+    });
   });
 }

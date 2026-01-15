@@ -66,6 +66,8 @@ private fun SetupScreen(
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current
+    var useManualEntry by remember { mutableStateOf(false) }
+    var manualInput by remember { mutableStateOf("") }
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
@@ -79,9 +81,12 @@ private fun SetupScreen(
         hasCameraPermission = granted
     }
 
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
+    fun tryPairing(data: String) {
+        val storage = SecureStorage(context)
+        if (storage.savePairing(data)) {
+            onPairingSuccess()
+        } else {
+            Toast.makeText(context, R.string.setup_error, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -92,33 +97,56 @@ private fun SetupScreen(
     ) {
         // Header
         Text(
-            text = "Scan Pairing QR",
+            text = if (useManualEntry) "Manual Pairing" else "Scan Pairing QR",
             fontSize = 24.sp,
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
         Text(
-            text = "Point your camera at the QR code displayed on your computer.",
+            text = if (useManualEntry)
+                "Paste the pairing data from your computer."
+            else
+                "Point your camera at the QR code displayed on your computer.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
-        // Camera preview or permission request
+        // Content area
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            if (hasCameraPermission) {
-                QRScanner(
-                    onQRCodeScanned = { qrContent ->
-                        val storage = SecureStorage(context)
-                        if (storage.savePairing(qrContent)) {
-                            onPairingSuccess()
-                        } else {
-                            Toast.makeText(context, R.string.setup_error, Toast.LENGTH_LONG).show()
-                        }
+            if (useManualEntry) {
+                // Manual entry mode
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    OutlinedTextField(
+                        value = manualInput,
+                        onValueChange = { manualInput = it },
+                        label = { Text("Pairing Data") },
+                        placeholder = { Text("{\"s\":\"...\",\"e\":...,\"w\":...,\"u\":\"...\"}") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        minLines = 5
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = { tryPairing(manualInput.trim()) },
+                        enabled = manualInput.contains("\"s\":"),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Pair")
                     }
+                }
+            } else if (hasCameraPermission) {
+                QRScanner(
+                    onQRCodeScanned = { qrContent -> tryPairing(qrContent) }
                 )
             } else {
                 // Permission not granted
@@ -139,12 +167,20 @@ private fun SetupScreen(
             }
         }
 
+        // Toggle between QR and manual entry
+        TextButton(
+            onClick = { useManualEntry = !useManualEntry },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (useManualEntry) "Use QR Scanner Instead" else "Enter Manually Instead")
+        }
+
         // Cancel button
         OutlinedButton(
             onClick = onCancel,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 16.dp)
+                .padding(top = 8.dp)
         ) {
             Text("Cancel")
         }

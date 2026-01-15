@@ -1,7 +1,11 @@
 package com.shareinbox
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,6 +21,7 @@ import com.shareinbox.network.InboxSender
 import com.shareinbox.storage.SecureStorage
 import com.shareinbox.ui.theme.ShareToInboxTheme
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 
 /**
  * Receives shared content from other apps
@@ -85,14 +90,55 @@ class ShareReceiverActivity : ComponentActivity() {
                         intent.getStringExtra(Intent.EXTRA_TEXT)
                     }
                     intent.type?.startsWith("image/") == true -> {
-                        // For images, extract the URI as text
-                        // Future: could upload image and share URL
-                        intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)?.toString()
+                        // Read image, compress, and base64 encode
+                        val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                        uri?.let { encodeImage(it) }
                     }
                     else -> null
                 }
             }
             else -> null
+        }
+    }
+
+    /**
+     * Read image from URI, resize if needed, and base64 encode
+     *
+     * ntfy.sh has limits, so we compress to stay under ~400KB
+     */
+    private fun encodeImage(uri: Uri): String? {
+        return try {
+            // Read image bytes
+            val inputStream = contentResolver.openInputStream(uri) ?: return null
+            val originalBitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream.close()
+
+            if (originalBitmap == null) return null
+
+            // Resize if too large (max 1200px on longest side)
+            val maxSize = 1200
+            val bitmap = if (originalBitmap.width > maxSize || originalBitmap.height > maxSize) {
+                val ratio = minOf(
+                    maxSize.toFloat() / originalBitmap.width,
+                    maxSize.toFloat() / originalBitmap.height
+                )
+                val newWidth = (originalBitmap.width * ratio).toInt()
+                val newHeight = (originalBitmap.height * ratio).toInt()
+                Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+            } else {
+                originalBitmap
+            }
+
+            // Compress to JPEG
+            val outputStream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+            val imageBytes = outputStream.toByteArray()
+
+            // Base64 encode with prefix
+            val base64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+            "[IMAGE:data:image/jpeg;base64,$base64]"
+        } catch (e: Exception) {
+            null
         }
     }
 

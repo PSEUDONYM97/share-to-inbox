@@ -151,39 +151,50 @@ export function getInboxStatus(config) {
 
 // CLI interface
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('fetch-inbox.js')) {
-  // Test with a sample config
-  const testConfig = {
-    secret: process.argv[2] || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-    server: process.argv[3] || 'https://ntfy.sh',
-    windowSeconds: 21600,
-    expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
-  };
+  import('fs').then(fs => {
+    import('os').then(os => {
+      import('path').then(async path => {
+        // Load config from file
+        const configPath = path.join(os.homedir(), '.share-to-inbox', 'config.json');
+        let config;
 
-  console.log('Fetching inbox...\n');
-  console.log('Config:', {
-    secret: testConfig.secret.substring(0, 8) + '...',
-    server: testConfig.server,
-    windowSeconds: testConfig.windowSeconds
-  });
-  console.log('');
+        try {
+          config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        } catch (e) {
+          console.error('No config found at', configPath);
+          console.error('Run generate-secret.js first to set up pairing.');
+          process.exit(1);
+        }
 
-  const topics = getRetrievalTopics(testConfig.secret, testConfig.windowSeconds);
-  console.log('Checking topics:');
-  console.log('  Current:  ', topics[0]);
-  console.log('  Previous: ', topics[1]);
-  console.log('');
+        console.log('Fetching inbox...\n');
+        console.log('Config:', {
+          secret: config.secret.substring(0, 8) + '...',
+          server: config.server,
+          windowSeconds: config.windowSeconds
+        });
+        console.log('');
 
-  fetchInbox(testConfig).then(messages => {
-    const result = formatInboxForDisplay(messages);
-    console.log('Result:', result.summary);
-    if (result.messages.length > 0) {
-      console.log('\nMessages:');
-      for (const msg of result.messages) {
-        console.log(`\n[${msg.time}]`);
-        console.log(msg.content);
-      }
-    }
-  }).catch(err => {
-    console.error('Error:', err.message);
+        const topics = getRetrievalTopics(config.secret, config.windowSeconds);
+        console.log('Checking topics:');
+        console.log('  Current:  ', topics[0]);
+        console.log('  Previous: ', topics[1]);
+        console.log('');
+
+        try {
+          const messages = await fetchInbox(config);
+          const result = formatInboxForDisplay(messages);
+          console.log('Result:', result.summary);
+          if (result.messages.length > 0) {
+            console.log('\nMessages:');
+            for (const msg of result.messages) {
+              console.log(`\n[${msg.time}]`);
+              console.log(msg.content);
+            }
+          }
+        } catch (err) {
+          console.error('Error:', err.message);
+        }
+      });
+    });
   });
 }
