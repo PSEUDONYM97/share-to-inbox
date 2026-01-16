@@ -65,33 +65,51 @@ class ShareReceiverActivity : ComponentActivity() {
             return
         }
 
-        // Show UI based on channel count
+        // Check if launched via share shortcut with specific channel
+        val shortcutChannelName = ChannelShortcuts.getChannelFromIntent(intent)
+        val targetChannel = if (shortcutChannelName != null) {
+            channels.find { it.name == shortcutChannelName }
+        } else null
+
+        // Show UI based on channel count and shortcut selection
         setContent {
             ShareToInboxTheme {
-                if (channels.size == 1) {
+                when {
+                    // Specific channel selected via shortcut
+                    targetChannel != null -> {
+                        SendingScreen(
+                            content = content,
+                            channel = targetChannel,
+                            onComplete = { success ->
+                                showResult(success)
+                                finish()
+                            }
+                        )
+                    }
                     // Single channel - send immediately
-                    SendingScreen(
-                        content = content,
-                        channel = channels.first(),
-                        onComplete = { success ->
-                            showResult(success)
-                            finish()
-                        }
-                    )
-                } else {
+                    channels.size == 1 -> {
+                        SendingScreen(
+                            content = content,
+                            channel = channels.first(),
+                            onComplete = { success ->
+                                showResult(success)
+                                finish()
+                            }
+                        )
+                    }
                     // Multiple channels - show picker
-                    ChannelPickerScreen(
-                        channels = channels,
-                        content = content,
-                        onChannelSelected = { channel ->
-                            // Switch to sending screen
-                        },
-                        onCancel = { finish() },
-                        onComplete = { success ->
-                            showResult(success)
-                            finish()
-                        }
-                    )
+                    else -> {
+                        ChannelPickerScreen(
+                            channels = channels,
+                            content = content,
+                            onChannelSelected = { },
+                            onCancel = { finish() },
+                            onComplete = { success ->
+                                showResult(success)
+                                finish()
+                            }
+                        )
+                    }
                 }
             }
         }

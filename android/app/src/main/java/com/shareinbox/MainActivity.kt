@@ -37,8 +37,13 @@ import java.util.*
  */
 class MainActivity : ComponentActivity() {
 
+    private lateinit var storage: SecureStorage
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        storage = SecureStorage(this)
+        // Initialize share shortcuts for existing channels
+        ChannelShortcuts.updateShortcuts(this)
         refreshContent()
     }
 
@@ -48,6 +53,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshContent() {
+        // Load channels fresh each time - don't let Compose cache stale data
+        val channels = storage.getChannels()
+
         setContent {
             ShareToInboxTheme {
                 Surface(
@@ -55,6 +63,8 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     MainScreen(
+                        initialChannels = channels,
+                        storage = storage,
                         onAddChannel = {
                             startActivity(Intent(this, SetupActivity::class.java))
                         }
@@ -67,19 +77,28 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MainScreen(onAddChannel: () -> Unit) {
+private fun MainScreen(
+    initialChannels: List<SecureStorage.Channel>,
+    storage: SecureStorage,
+    onAddChannel: () -> Unit
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val storage = remember { SecureStorage(context) }
-    var channels by remember { mutableStateOf(storage.getChannels()) }
+    var channels by remember { mutableStateOf(initialChannels) }
+
+    // Update channels when initialChannels changes (e.g., on resume)
+    LaunchedEffect(initialChannels) {
+        channels = initialChannels
+    }
 
     // Dialog states
     var channelToRename by remember { mutableStateOf<SecureStorage.Channel?>(null) }
     var channelToDelete by remember { mutableStateOf<SecureStorage.Channel?>(null) }
     var newName by remember { mutableStateOf("") }
 
-    // Refresh channels when needed
+    // Refresh channels and shortcuts when needed
     fun refresh() {
         channels = storage.getChannels()
+        ChannelShortcuts.updateShortcuts(context)
     }
 
     Column(

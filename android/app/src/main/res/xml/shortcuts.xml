@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Share target for channel shortcuts -->
+    <!-- Dynamic shortcuts are created by ChannelShortcuts.kt -->
+    <share-target android:targetClass="com.shareinbox.ShareReceiverActivity">
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="text/html" />
+        <data android:mimeType="image/*" />
+        <category android:name="com.shareinbox.category.SHARE_TARGET" />
+    </share-target>
+
+</shortcuts>

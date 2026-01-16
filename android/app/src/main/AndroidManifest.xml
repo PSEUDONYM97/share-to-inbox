@@ -38,7 +38,7 @@
             android:theme="@style/Theme.ShareToInbox" />
 
         <!-- Share Receiver Activity -->
-        <!-- This appears in the share menu -->
+        <!-- This appears in the share menu with channel shortcuts -->
         <activity
             android:name=".ShareReceiverActivity"
             android:exported="true"
@@ -73,6 +73,11 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="shareinbox" />
             </intent-filter>
+
+            <!-- Share shortcuts for direct channel selection -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
     </application>

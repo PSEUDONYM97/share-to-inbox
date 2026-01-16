@@ -90,6 +90,8 @@ private fun SetupScreen(
         val storage = SecureStorage(context)
         val channel = storage.addChannel(data)
         if (channel != null) {
+            // Update share shortcuts with new channel
+            ChannelShortcuts.updateShortcuts(context)
             onPairingSuccess(channel.name)
         } else {
             Toast.makeText(context, R.string.setup_error, Toast.LENGTH_LONG).show()
