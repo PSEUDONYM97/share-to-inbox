@@ -1,0 +1,13 @@
+{
+  "name": "share-to-inbox-marketplace",
+  "owner": {
+    "name": "Jared Williams"
+  },
+  "plugins": [
+    {
+      "name": "share-to-inbox",
+      "source": "./",
+      "description": "Share content from Android to your AI inbox"
+    }
+  ]
+}
